@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const webpush = require('web-push');
 const cron = require('node-cron');
-const { google } = require('googleapis');
+const { createClient } = require('@supabase/supabase-js');
 
 // ---------- CONFIG ----------
 const PORT = process.env.PORT || 3000;
@@ -12,18 +12,15 @@ const FRONTEND_URL = process.env.FRONTEND_URL; // e.g. https://yourname.github.i
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:you@example.com';
-
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-// Render env vars can't hold real newlines — the key is pasted with \n, so we convert them back.
-const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
   console.error('Missing VAPID keys. Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY.');
   process.exit(1);
 }
-if (!SPREADSHEET_ID || !GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY) {
-  console.error('Missing Google Sheets config. Set SPREADSHEET_ID, GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY.');
+if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+  console.error('Missing Supabase config. Set SUPABASE_URL and SUPABASE_SERVICE_KEY.');
   process.exit(1);
 }
 if (!FRONTEND_URL) {
@@ -32,17 +29,7 @@ if (!FRONTEND_URL) {
 }
 
 webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-
-const auth = new google.auth.JWT(
-  GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  null,
-  GOOGLE_PRIVATE_KEY,
-  ['https://www.googleapis.com/auth/spreadsheets']
-);
-const sheets = google.sheets({ version: 'v4', auth });
-
-const SUB_SHEET = 'Subscriptions'; // columns: endpoint | subscription_json | created_at
-const ENTRY_SHEET = 'Entries';     // columns: created_at | q1_id | q1_text | a1 | q2_id | q2_text | a2
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ---------- QUESTIONS (keep this array identical to the one in the frontend) ----------
 const QUESTIONS = [
@@ -67,51 +54,6 @@ function pickTwoQuestions() {
   return [first, second];
 }
 
-// ---------- GOOGLE SHEETS HELPERS ----------
-async function appendRow(sheetName, values) {
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A:Z`,
-    valueInputOption: 'RAW',
-    insertDataOption: 'INSERT_ROWS',
-    requestBody: { values: [values] },
-  });
-}
-
-async function getAllRows(sheetName) {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A:Z`,
-  });
-  return res.data.values || []; // includes header row at index 0
-}
-
-async function getSheetIdByName(sheetName) {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
-  const sheet = meta.data.sheets.find(s => s.properties.title === sheetName);
-  return sheet ? sheet.properties.sheetId : null;
-}
-
-async function deleteRowByIndex(sheetName, rowIndexZeroBased) {
-  const sheetId = await getSheetIdByName(sheetName);
-  if (sheetId === null) return;
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [{
-        deleteDimension: {
-          range: {
-            sheetId,
-            dimension: 'ROWS',
-            startIndex: rowIndexZeroBased,
-            endIndex: rowIndexZeroBased + 1,
-          },
-        },
-      }],
-    },
-  });
-}
-
 // ---------- APP ----------
 const app = express();
 app.use(cors());
@@ -119,23 +61,20 @@ app.use(express.json());
 
 app.get('/', (req, res) => res.send('Life Log backend is running.'));
 
-// Save a push subscription (skip if endpoint already stored)
+// Save a push subscription
 app.post('/api/subscribe', async (req, res) => {
   const subscription = req.body;
   if (!subscription || !subscription.endpoint) {
     return res.status(400).json({ error: 'Invalid subscription' });
   }
-  try {
-    const rows = await getAllRows(SUB_SHEET);
-    const exists = rows.slice(1).some(r => r[0] === subscription.endpoint);
-    if (!exists) {
-      await appendRow(SUB_SHEET, [subscription.endpoint, JSON.stringify(subscription), new Date().toISOString()]);
-    }
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Could not save subscription' });
+  const { error } = await supabase
+    .from('subscriptions')
+    .upsert({ endpoint: subscription.endpoint, subscription }, { onConflict: 'endpoint' });
+  if (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Could not save subscription' });
   }
+  res.json({ ok: true });
 });
 
 // Save a journal entry
@@ -144,13 +83,14 @@ app.post('/api/entry', async (req, res) => {
   if (!q1_text || !q2_text) {
     return res.status(400).json({ error: 'Missing question text' });
   }
-  try {
-    await appendRow(ENTRY_SHEET, [new Date().toISOString(), q1_id, q1_text, a1 || '', q2_id, q2_text, a2 || '']);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Could not save entry' });
+  const { error } = await supabase.from('entries').insert({
+    q1_id, q1_text, a1: a1 || '', q2_id, q2_text, a2: a2 || '',
+  });
+  if (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Could not save entry' });
   }
+  res.json({ ok: true });
 });
 
 // Manual trigger for testing (sends to all subscribers right now)
@@ -161,14 +101,11 @@ app.post('/api/send-test', async (req, res) => {
 
 // ---------- SENDING PUSH ----------
 async function sendToAllSubscribers() {
-  let rows;
-  try {
-    rows = await getAllRows(SUB_SHEET);
-  } catch (err) {
-    console.error('Failed to load subscriptions', err);
+  const { data: subs, error } = await supabase.from('subscriptions').select('*');
+  if (error) {
+    console.error('Failed to load subscriptions', error);
     return 0;
   }
-  const dataRows = rows.slice(1); // skip header
   const [q1, q2] = pickTwoQuestions();
   const payload = JSON.stringify({
     title: 'Life Log',
@@ -177,25 +114,15 @@ async function sendToAllSubscribers() {
   });
 
   let sent = 0;
-  // Walk backwards so deleting a row doesn't shift indices of rows we haven't processed yet
-  for (let i = dataRows.length - 1; i >= 0; i--) {
-    const [endpoint, subscriptionJson] = dataRows[i];
-    if (!subscriptionJson) continue;
-    let subscription;
+  for (const row of subs) {
     try {
-      subscription = JSON.parse(subscriptionJson);
-    } catch {
-      continue;
-    }
-    try {
-      await webpush.sendNotification(subscription, payload);
+      await webpush.sendNotification(row.subscription, payload);
       sent++;
     } catch (err) {
       if (err.statusCode === 404 || err.statusCode === 410) {
-        const rowIndexZeroBased = i + 1; // +1 to account for header row
-        await deleteRowByIndex(SUB_SHEET, rowIndexZeroBased).catch(() => {});
+        await supabase.from('subscriptions').delete().eq('endpoint', row.endpoint);
       } else {
-        console.error('Push failed for', endpoint, err.statusCode, err.body);
+        console.error('Push failed for', row.endpoint, err.statusCode, err.body);
       }
     }
   }
