@@ -130,48 +130,128 @@ async function sendToAllSubscribers() {
   return sent;
 }
 
-// ---------- RANDOM DAILY SCHEDULING ----------
+// ---------- RANDOM DAILY SCHEDULING (persisted — survives restarts/sleep) ----------
 const WINDOWS = [
   { startHour: 8, endHour: 12 },
   { startHour: 13, endHour: 18 },
   { startHour: 18, endHour: 22 },
 ];
 
-const scheduledTimeouts = [];
+function getNowInTimezone() {
+  const now = new Date();
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIMEZONE, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(now).map(p => [p.type, p.value]));
+  const dateStr = `${parts.year}-${parts.month}-${parts.day}`; // YYYY-MM-DD
+  const minutesOfDay = parseInt(parts.hour, 10) * 60 + parseInt(parts.minute, 10);
+  return { now, dateStr, minutesOfDay };
+}
 
-function randomTimeWithinWindow(win) {
-  const startMinutes = win.startHour * 60;
-  const endMinutes = win.endHour * 60;
+function randomMinuteOfDayInRange(startMinutes, endMinutes) {
+  if (endMinutes <= startMinutes) return startMinutes;
   return startMinutes + Math.floor(Math.random() * (endMinutes - startMinutes));
 }
 
-function scheduleTodaysNotifications() {
-  scheduledTimeouts.forEach(clearTimeout);
-  scheduledTimeouts.length = 0;
-
-  const now = new Date();
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: TIMEZONE, hour12: false, hour: '2-digit', minute: '2-digit',
-  });
-  const parts = fmt.formatToParts(now);
-  const nowHour = parseInt(parts.find(p => p.type === 'hour').value, 10);
-  const nowMinute = parseInt(parts.find(p => p.type === 'minute').value, 10);
-  const nowMinutesOfDay = nowHour * 60 + nowMinute;
-
-  WINDOWS.forEach((win, idx) => {
-    const targetMinutesOfDay = randomTimeWithinWindow(win);
-    let delayMinutes = targetMinutesOfDay - nowMinutesOfDay;
-    if (delayMinutes < 0) return;
-    const delayMs = delayMinutes * 60 * 1000;
-    const h = Math.floor(targetMinutesOfDay / 60);
-    const m = targetMinutesOfDay % 60;
-    console.log(`Scheduled window ${idx + 1} notification today at ${h}:${String(m).padStart(2, '0')} (${TIMEZONE})`);
-    const t = setTimeout(() => sendToAllSubscribers(), delayMs);
-    scheduledTimeouts.push(t);
-  });
+// Convert "minutes since midnight, TIMEZONE" on a given date into a real UTC Date object
+function minuteOfDayToDate(dateStr, minutesOfDay) {
+  const h = Math.floor(minutesOfDay / 60);
+  const m = minutesOfDay % 60;
+  const guess = new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
+  const tzDate = new Date(guess.toLocaleString('en-US', { timeZone: TIMEZONE }));
+  const utcDate = new Date(guess.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const offsetMs = utcDate.getTime() - tzDate.getTime();
+  return new Date(guess.getTime() + offsetMs);
 }
 
-cron.schedule('1 0 * * *', scheduleTodaysNotifications, { timezone: TIMEZONE });
-scheduleTodaysNotifications();
+// Ensure today has 3 scheduled rows in Supabase. Self-heals after any restart.
+async function ensureTodaysSchedule() {
+  const { dateStr, minutesOfDay: nowMinutes } = getNowInTimezone();
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from('schedule')
+    .select('slot')
+    .eq('date', dateStr);
+  if (fetchErr) {
+    console.error('Could not check schedule', fetchErr);
+    return;
+  }
+  const existingSlots = new Set((existing || []).map(r => r.slot));
+
+  const rowsToInsert = [];
+  WINDOWS.forEach((win, idx) => {
+    const slot = idx + 1;
+    if (existingSlots.has(slot)) return;
+
+    const startMinutes = win.startHour * 60;
+    const endMinutes = win.endHour * 60;
+    let scheduledAt;
+    let markSentImmediately = false;
+
+    if (nowMinutes >= endMinutes) {
+      // Window already fully passed today (e.g. server was asleep) — don't fire it retroactively.
+      scheduledAt = minuteOfDayToDate(dateStr, endMinutes);
+      markSentImmediately = true;
+    } else if (nowMinutes > startMinutes) {
+      // Mid-window right now — pick a random remaining moment in this window.
+      const target = randomMinuteOfDayInRange(nowMinutes, endMinutes);
+      scheduledAt = minuteOfDayToDate(dateStr, target);
+    } else {
+      // Window hasn't started yet — pick a random moment anywhere in it.
+      const target = randomMinuteOfDayInRange(startMinutes, endMinutes);
+      scheduledAt = minuteOfDayToDate(dateStr, target);
+    }
+
+    rowsToInsert.push({
+      date: dateStr,
+      slot,
+      scheduled_at: scheduledAt.toISOString(),
+      sent: markSentImmediately,
+    });
+  });
+
+  if (rowsToInsert.length > 0) {
+    const { error: insertErr } = await supabase.from('schedule').insert(rowsToInsert);
+    if (insertErr) {
+      // Ignore duplicate-key races (two ticks generating the same day at once) — harmless.
+      if (insertErr.code !== '23505') console.error('Could not insert schedule', insertErr);
+    } else {
+      rowsToInsert.forEach(r => {
+        console.log(`Schedule slot ${r.slot} for ${r.date}: ${r.scheduled_at}${r.sent ? ' (window already passed, skipped)' : ''}`);
+      });
+    }
+  }
+}
+
+// Runs every minute: create today's schedule if missing, and fire any due, unsent slot.
+async function tick() {
+  await ensureTodaysSchedule();
+
+  const { data: due, error } = await supabase
+    .from('schedule')
+    .select('*')
+    .eq('sent', false)
+    .lte('scheduled_at', new Date().toISOString());
+  if (error) {
+    console.error('Could not check due schedule rows', error);
+    return;
+  }
+
+  for (const row of due || []) {
+    // Mark as sent first to avoid double-sending if two ticks overlap.
+    const { error: updateErr } = await supabase
+      .from('schedule')
+      .update({ sent: true })
+      .eq('id', row.id)
+      .eq('sent', false);
+    if (updateErr) continue;
+    console.log(`Firing scheduled notification: slot ${row.slot}, ${row.date}`);
+    await sendToAllSubscribers();
+  }
+}
+
+cron.schedule('* * * * *', tick, { timezone: TIMEZONE });
+tick(); // also run once immediately on boot
 
 app.listen(PORT, () => console.log(`Life Log backend listening on port ${PORT}`));
