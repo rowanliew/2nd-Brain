@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Life Log</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f0f12">
 <style>
   :root {
     --bg: #0f0f12;
@@ -92,7 +97,7 @@ const QUESTIONS = [
 ];
 
 // ===== REPLACE THESE TWO VALUES =====
-const API_BASE = "https://twond-brain-mx2v.onrender.com"; // your deployed backend
+const API_BASE = "https://YOUR-BACKEND-URL.onrender.com"; // your deployed backend
 const VAPID_PUBLIC_KEY = "BJ25MtoCFLCqNg6zRF0VxwRA6cetF4r_WR527irNDvxGeLcsU16e33S96NA4ksI3x4aYt9uzhtvE8YGquQVE8mA";
 // =====================================
 
@@ -112,6 +117,7 @@ function renderHome() {
     <h1>Life Log</h1>
     <p class="sub">Get a random check-in prompt 3 times a day. Enable notifications to start.</p>
     <button id="enableBtn">Enable notifications</button>
+    <button class="secondary" id="pushTestBtn">Send test push notification</button>
     <button class="secondary" id="testBtn">Open a sample check-in now</button>
     <div class="status" id="status"></div>
   `;
@@ -120,6 +126,27 @@ function renderHome() {
     const [a, b] = pickTwo();
     window.location.search = `?q1=${a.id}&q2=${b.id}`;
   };
+  document.getElementById('pushTestBtn').onclick = sendTestPush;
+}
+
+async function sendTestPush() {
+  const status = document.getElementById('status');
+  const btn = document.getElementById('pushTestBtn');
+  btn.disabled = true;
+  status.textContent = 'Sending...';
+  try {
+    const res = await fetch(`${API_BASE}/api/send-test`, { method: 'POST' });
+    if (!res.ok) throw new Error('Request failed');
+    const data = await res.json();
+    status.textContent = data.sent > 0
+      ? `Sent to ${data.sent} device(s). Check your notifications.`
+      : 'No subscribed devices found — enable notifications first.';
+  } catch (err) {
+    console.error(err);
+    status.textContent = 'Could not reach the backend. Check API_BASE and that Render is awake.';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function pickTwo() {
