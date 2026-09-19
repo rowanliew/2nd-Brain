@@ -32,10 +32,18 @@
 <script>
 // ===== REPLACE THESE TWO VALUES (Supabase → Settings → API) =====
 const SUPABASE_URL = "https://qjnccnpsmcrmdcbworot.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqbmNjbnBzbWNybWRjYndvcm90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2OTI1MDUsImV4cCI6MjEwNTI2ODUwNX0.i7_8d_RNHz3MJbp8GUZkfjUU51jk0K86rf-L9HWSLcQ"; // the "anon public" key, NOT the service_role key
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqbmNjbnBzbWNybWRjYndvcm90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2OTI1MDUsImV4cCI6MjEwNTI2ODUwNX0.i7_8d_RN[...]
 // ==================================================================
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let supabase = null;
+
+try {
+  if (window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY) {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+} catch (error) {
+  console.error('Supabase initialization failed:', error);
+}
 
 const QUESTIONS = [
   { id: 0, text: "What's the most \"main character\" moment you had this week?" },
@@ -69,23 +77,35 @@ app.innerHTML = `
   <textarea id="a1" placeholder="Your answer..."></textarea>
   <div class="question">${q2.text}</div>
   <textarea id="a2" placeholder="Your answer..."></textarea>
-  <button id="submitBtn">Save entry</button>
-  <div class="status" id="status"></div>
+  <button id="submitBtn" ${supabase ? '' : 'disabled'}>${supabase ? 'Save entry' : 'Unavailable'}</button>
+  <div class="status" id="status">${supabase ? '' : 'Supabase did not load. Check the CDN or browser console.'}</div>
 `;
 
+if (!supabase) {
+  console.warn('Supabase is unavailable. The form is visible, but saves will not work until the client loads.');
+}
+
 document.getElementById('submitBtn').onclick = async () => {
+  const statusEl = document.getElementById('status');
   const a1 = document.getElementById('a1').value.trim();
   const a2 = document.getElementById('a2').value.trim();
   const btn = document.getElementById('submitBtn');
+
+  if (!supabase) {
+    statusEl.textContent = 'Saving is unavailable because Supabase did not initialize.';
+    return;
+  }
+
   btn.disabled = true;
   btn.textContent = 'Saving...';
   const { error } = await supabase.from('entries').insert({
     q1_id: q1.id, q1_text: q1.text, a1,
     q2_id: q2.id, q2_text: q2.text, a2,
   });
+
   if (error) {
     console.error(error);
-    document.getElementById('status').textContent = 'Could not save — try again.';
+    statusEl.textContent = 'Could not save — try again.';
     btn.disabled = false;
     btn.textContent = 'Save entry';
   } else {
