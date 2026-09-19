@@ -86,7 +86,7 @@ try {
     btn.disabled = true;
     btn.textContent = 'Saving...';
     try {
-      const { error } = await supabase.from('entries').insert({
+      const { error } = await supabaseClient.from('entries').insert({
         q1_id: q1.id, q1_text: q1.text, a1,
         q2_id: q2.id, q2_text: q2.text, a2,
       });
