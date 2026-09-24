@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/dashersw/liquid-glass-js@main/styles.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/dashersw/liquid-glass-js@main/glass.css">
 <style>
   :root {
     --bg: #0a0a0d;
@@ -66,41 +64,64 @@
     gap: 16px;
   }
 
-  /* Wrapper around each liquid-glass Button, positioned as a grid cell */
-  .glass-cell {
-    --c: var(--self);
+  .card {
+    --c: var(--self); /* overridden per card */
     position: relative;
-    min-height: 120px;
     border-radius: 22px;
-    cursor: pointer;
-  }
-  .glass-cell .glass-container,
-  .glass-cell .glass-button {
-    width: 100% !important;
-    height: 100% !important;
+    padding: 20px 16px;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     box-shadow:
       0 8px 28px rgba(0, 0, 0, 0.35),
-      0 0 24px -6px var(--c) !important;
+      0 0 24px -6px var(--c),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    -webkit-tap-highlight-color: transparent;
   }
-  .glass-cell .glass-button-text {
-    font-size: 15px !important;
-    font-weight: 700 !important;
+  .card:active {
+    transform: scale(0.96);
   }
-  .glass-cell .tag {
-    position: absolute;
-    left: 16px;
-    bottom: 10px;
-    font-size: 11px;
-    color: var(--muted);
-    pointer-events: none;
+  @media (hover: hover) {
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow:
+        0 14px 34px rgba(0, 0, 0, 0.4),
+        0 0 34px -4px var(--c),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    }
   }
 
-  .glass-cell.urgent { --c: var(--urgent); }
-  .glass-cell.self { --c: var(--self); }
-  .glass-cell.content { --c: var(--content); }
-  .glass-cell.study { --c: var(--study); }
-  .glass-cell.agency { --c: var(--agency); }
-  .glass-cell.others { --c: var(--others); grid-column: span 2; }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--c);
+    box-shadow: 0 0 10px 1px var(--c);
+    margin-bottom: 12px;
+  }
+  .card .label {
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .card .tag {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .card.urgent { --c: var(--urgent); }
+  .card.self { --c: var(--self); }
+  .card.content { --c: var(--content); }
+  .card.study { --c: var(--study); }
+  .card.agency { --c: var(--agency); }
+  .card.others { --c: var(--others); grid-column: span 2; }
 
   /* ---- Shared side nav ---- */
   .nav-toggle {
@@ -158,12 +179,35 @@
     <h1>Dashboard</h1>
     <p class="sub">Everything, sorted.</p>
 
-    <div class="grid" id="glassGrid"></div>
+    <div class="grid">
+      <div class="card urgent" data-key="urgent">
+        <div class="dot"></div>
+        <div class="label">Urgent</div>
+      </div>
+      <div class="card self" data-key="self">
+        <div class="dot"></div>
+        <div class="label">Self</div>
+      </div>
+      <div class="card content" data-key="content">
+        <div class="dot"></div>
+        <div class="label">Content</div>
+      </div>
+      <div class="card study" data-key="study">
+        <div class="dot"></div>
+        <div class="label">Study</div>
+      </div>
+      <div class="card agency" data-key="agency">
+        <div class="dot"></div>
+        <div class="label">Agency</div>
+      </div>
+      <div class="card others" data-key="others">
+        <div class="dot"></div>
+        <div class="label">Others</div>
+        <div class="tag">pianoliew / xhs</div>
+      </div>
+    </div>
   </div>
 
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/dashersw/liquid-glass-js@main/container.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/dashersw/liquid-glass-js@main/button.js"></script>
 <script>
   const navToggle = document.getElementById('navToggle');
   const navDrawer = document.getElementById('navDrawer');
@@ -177,48 +221,12 @@
     navOverlay.classList.remove('open');
   });
 
-  const CATEGORIES = [
-    { key: 'urgent',  label: 'Urgent'  },
-    { key: 'self',    label: 'Self'    },
-    { key: 'content', label: 'Content' },
-    { key: 'study',   label: 'Study'   },
-    { key: 'agency',  label: 'Agency'  },
-    { key: 'others',  label: 'Others', tag: 'pianoliew / xhs' },
-  ];
-
-  const grid = document.getElementById('glassGrid');
-
-  CATEGORIES.forEach(cat => {
-    const cell = document.createElement('div');
-    cell.className = `glass-cell ${cat.key}`;
-
-    const btn = new Button({
-      text: cat.label,
-      size: 15,
-      type: 'rounded',
-      borderRadius: 22,
-      tintOpacity: 0.22,
-      onClick: () => {
-        console.log('Tapped:', cat.key);
-        // e.g. window.location.href = `${cat.key}.html`;
-      },
-    });
-
-    cell.appendChild(btn.element);
-
-    if (cat.tag) {
-      const tagEl = document.createElement('div');
-      tagEl.className = 'tag';
-      tagEl.textContent = cat.tag;
-      cell.appendChild(tagEl);
-    }
-
-    grid.appendChild(cell);
-
-    // The library sizes its WebGL canvas from the DOM at creation time;
-    // since our CSS stretches it to fill .glass-cell afterward, force a resync.
-    requestAnimationFrame(() => {
-      if (btn.updateSizeFromDOM) btn.updateSizeFromDOM();
+  // Placeholder tap handler — wire each key up to a real page/tab when ready.
+  document.querySelectorAll('.card').forEach(card => {
+    card.addEventListener('click', () => {
+      const key = card.dataset.key;
+      console.log('Tapped:', key);
+      // e.g. window.location.href = `${key}.html`;
     });
   });
 </script>
