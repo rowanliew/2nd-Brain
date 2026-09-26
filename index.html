@@ -123,52 +123,35 @@
   .card.agency { --c: var(--agency); }
   .card.others { --c: var(--others); grid-column: span 2; }
 
-  /* ---- Shared nav: Minecraft-hotbar-style tab switcher ---- */
-  .mc-hotbar {
+  /* ---- Shared nav: real Minecraft hotbar PNG, full image, uncropped ---- */
+  .mc-hotbar-wrap {
     position: fixed;
-    bottom: 18px;
+    bottom: 14px;
     left: 50%;
     transform: translateX(-50%);
+    width: min(360px, 92vw);
     z-index: 50;
-    display: flex;
-    gap: 3px;
-    padding: 4px;
-    background: #2b2b2b;
-    border: 2px solid #000;
-    border-radius: 2px;
   }
-  .mc-slot {
-    position: relative;
-    width: 46px;
-    height: 46px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    text-decoration: none;
-    background: #6b6b6b;
-    border: 2px solid #3a3a3a;
-    box-shadow:
-      inset 2px 2px 0 rgba(255, 255, 255, 0.35),
-      inset -2px -2px 0 rgba(0, 0, 0, 0.4);
+  .mc-hotbar-img {
+    width: 100%;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+    pointer-events: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .mc-slot-hit {
+    position: absolute;
+    display: block;
     -webkit-tap-highlight-color: transparent;
   }
-  .mc-slot:active { filter: brightness(0.9); }
-  .mc-slot .mc-label {
+  .mc-active-highlight {
     position: absolute;
-    bottom: -15px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 9px;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-  .mc-slot.active {
-    border-color: #f5f5f5;
-    box-shadow:
-      inset 2px 2px 0 rgba(255, 255, 255, 0.5),
-      inset -2px -2px 0 rgba(0, 0, 0, 0.35),
-      0 0 0 2px rgba(255, 255, 255, 0.85);
+    border: 2px solid #fff;
+    box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.8);
+    border-radius: 2px;
+    pointer-events: none;
   }
 </style>
 </head>
@@ -179,9 +162,11 @@
   <div class="blob b4"></div>
   <div class="blob b5"></div>
 
-  <nav class="mc-hotbar">
-    <a href="index.html" class="mc-slot active">🏠<span class="mc-label">Dashboard</span></a>
-    <a href="lifelog.html" class="mc-slot">📓<span class="mc-label">Life Log</span></a>
+  <nav class="mc-hotbar-wrap">
+    <img src="assets/hotbar.png" alt="Nav: Dashboard / Life Log" class="mc-hotbar-img">
+    <a href="index.html" class="mc-slot-hit" style="left:1.08%; top:54.55%; width:10.87%; height:41.82%;" aria-label="Dashboard"></a>
+    <a href="lifelog.html" class="mc-slot-hit" style="left:11.95%; top:54.55%; width:10.87%; height:41.82%;" aria-label="Life Log"></a>
+    <div class="mc-active-highlight" style="left:1.08%; top:54.55%; width:10.87%; height:41.82%;"></div>
   </nav>
 
   <div class="wrap" style="padding-bottom: 90px;">
