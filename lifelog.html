@@ -33,59 +33,44 @@
   .entry .empty { color:#5c5c64; font-style:italic; }
   .empty-day { font-size:12px; color:#5c5c64; font-style:italic; }
 
-  /* ---- Shared nav: Minecraft-hotbar-style tab switcher ---- */
-  .mc-hotbar {
+  /* ---- Shared nav: real Minecraft hotbar PNG, full image, uncropped ---- */
+  .mc-hotbar-wrap {
     position: fixed;
-    bottom: 18px;
+    bottom: 14px;
     left: 50%;
     transform: translateX(-50%);
+    width: min(360px, 92vw);
     z-index: 50;
-    display: flex;
-    gap: 3px;
-    padding: 4px;
-    background: #2b2b2b;
-    border: 2px solid #000;
-    border-radius: 2px;
   }
-  .mc-slot {
-    position: relative;
-    width: 46px;
-    height: 46px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    text-decoration: none;
-    background: #6b6b6b;
-    border: 2px solid #3a3a3a;
-    box-shadow:
-      inset 2px 2px 0 rgba(255, 255, 255, 0.35),
-      inset -2px -2px 0 rgba(0, 0, 0, 0.4);
+  .mc-hotbar-img {
+    width: 100%;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+    pointer-events: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .mc-slot-hit {
+    position: absolute;
+    display: block;
     -webkit-tap-highlight-color: transparent;
   }
-  .mc-slot:active { filter: brightness(0.9); }
-  .mc-slot .mc-label {
+  .mc-active-highlight {
     position: absolute;
-    bottom: -15px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 9px;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-  .mc-slot.active {
-    border-color: #f5f5f5;
-    box-shadow:
-      inset 2px 2px 0 rgba(255, 255, 255, 0.5),
-      inset -2px -2px 0 rgba(0, 0, 0, 0.35),
-      0 0 0 2px rgba(255, 255, 255, 0.85);
+    border: 2px solid #fff;
+    box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.8);
+    border-radius: 2px;
+    pointer-events: none;
   }
 </style>
 </head>
 <body>
-  <nav class="mc-hotbar">
-    <a href="index.html" class="mc-slot">🏠<span class="mc-label">Dashboard</span></a>
-    <a href="lifelog.html" class="mc-slot active">📓<span class="mc-label">Life Log</span></a>
+  <nav class="mc-hotbar-wrap">
+    <img src="assets/hotbar.png" alt="Nav: Dashboard / Life Log" class="mc-hotbar-img">
+    <a href="index.html" class="mc-slot-hit" style="left:1.08%; top:54.55%; width:10.87%; height:41.82%;" aria-label="Dashboard"></a>
+    <a href="lifelog.html" class="mc-slot-hit" style="left:11.95%; top:54.55%; width:10.87%; height:41.82%;" aria-label="Life Log"></a>
+    <div class="mc-active-highlight" style="left:11.95%; top:54.55%; width:10.87%; height:41.82%;"></div>
   </nav>
 
   <div class="card" id="app" style="margin-bottom: 90px;">Loading...</div>
@@ -95,6 +80,8 @@
 // ===== REPLACE THESE TWO VALUES (Supabase → Settings → API) =====
 const SUPABASE_URL = "https://qjnccnpsmcrmdcbworot.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqbmNjbnBzbWNybWRjYndvcm90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2OTI1MDUsImV4cCI6MjEwNTI2ODUwNX0.i7_8d_RNHz3MJbp8GUZkfjUU51jk0K86rf-L9HWSLcQ"; // the "anon public" key, NOT the service_role key
+
+// ==================================================================
 
 const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
@@ -118,6 +105,124 @@ function pickTwo() {
   const first = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
   const second = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
   return [first, second];
+}
+
+const app = document.getElementById('app');
+
+try {
+  if (!window.supabase) {
+    throw new Error('The Supabase library failed to load from the CDN (cdn.jsdelivr.net). Check your internet connection, disable any content/ad blocker for this site, or try a different browser.');
+  }
+
+  const [q1, q2] = pickTwo();
+
+  app.innerHTML = `
+    <h1>Life Log</h1>
+    <p class="sub">Answer honestly. Takes a minute.</p>
+    <div class="question">${q1.text}</div>
+    <textarea id="a1" placeholder="Your answer..."></textarea>
+    <div class="question">${q2.text}</div>
+    <textarea id="a2" placeholder="Your answer..."></textarea>
+    <button id="submitBtn">Save entry</button>
+    <div class="status" id="status"></div>
+  `;
+
+  document.getElementById('submitBtn').onclick = async () => {
+    const a1 = document.getElementById('a1').value.trim();
+    const a2 = document.getElementById('a2').value.trim();
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    try {
+      const { error } = await sb.from('entries').insert({
+        q1_id: q1.id, q1_text: q1.text, a1,
+        q2_id: q2.id, q2_text: q2.text, a2,
+      });
+      if (error) throw error;
+      await renderWeekView();
+    } catch (err) {
+      console.error(err);
+      document.getElementById('status').textContent = 'Could not save: ' + (err.message || 'unknown error');
+      btn.disabled = false;
+      btn.textContent = 'Save entry';
+    }
+  };
+} catch (err) {
+  console.error(err);
+  app.innerHTML = `<h1>Something went wrong</h1><p class="sub" style="color:#f2a3a3">${err.message}</p>`;
+}
+
+const TIMEZONE = 'Asia/Kuala_Lumpur';
+
+function localDateKey(isoString) {
+  // 'en-CA' gives YYYY-MM-DD directly
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date(isoString));
+}
+
+function dayLabel(dateKey) {
+  const d = new Date(dateKey + 'T12:00:00'); // noon avoids timezone edge issues
+  return new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(d);
+}
+
+async function renderWeekView() {
+  app.innerHTML = `<h1>Saved ✓</h1><p class="sub">Loading the past week...</p>`;
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await sb
+    .from('entries')
+    .select('*')
+    .gte('created_at', sevenDaysAgo)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    app.innerHTML = `<h1>Saved ✓</h1><p class="sub" style="color:#f2a3a3">Could not load past logs: ${error.message}</p>`;
+    return;
+  }
+
+  // Build the last 7 day keys (oldest to newest), so empty days still show a column
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const key = localDateKey(new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString());
+    days.push(key);
+  }
+
+  const byDay = {};
+  days.forEach(k => (byDay[k] = []));
+  (data || []).forEach(row => {
+    const key = localDateKey(row.created_at);
+    if (byDay[key]) byDay[key].push(row);
+  });
+
+  const columnsHtml = days.map(key => {
+    const entries = byDay[key];
+    const entriesHtml = entries.length
+      ? entries.map(e => `
+          <div class="entry">
+            <div class="entry-q">${e.q1_text}</div>
+            <div class="entry-a">${e.a1 || '<span class="empty">(no answer)</span>'}</div>
+            <div class="entry-q">${e.q2_text}</div>
+            <div class="entry-a">${e.a2 || '<span class="empty">(no answer)</span>'}</div>
+          </div>
+        `).join('')
+      : `<div class="empty-day">No entry</div>`;
+    return `
+      <div class="day-col">
+        <div class="day-header">${dayLabel(key)}</div>
+        ${entriesHtml}
+      </div>
+    `;
+  }).join('');
+
+  app.innerHTML = `
+    <h1>Saved ✓</h1>
+    <p class="sub">Your logs from the past week</p>
+    <div class="week-scroll">${columnsHtml}</div>
+  `;
+}
+
+</script>
+</body>
+</html>  return [first, second];
 }
 
 const app = document.getElementById('app');
